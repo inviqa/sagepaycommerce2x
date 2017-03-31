@@ -1,0 +1,24 @@
+<?php
+
+/**
+ * @file
+ * Contains commerce_sagepay.module.
+ */
+
+use Drupal\Core\Routing\RouteMatchInterface;
+
+/**
+ * Implements hook_help().
+ */
+function commerce_sagepay_help($route_name, RouteMatchInterface $route_match) {
+  switch ($route_name) {
+    // Main module help for the commerce_sagepay module.
+    case 'help.page.commerce_sagepay':
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t('Provides Integration with the SagePay Payment Gateway (http://www.sagepay.com) using Form, Server or Token method.') . '</p>';
+      return $output;
+
+    default:
+  }
+}
