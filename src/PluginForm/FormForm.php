@@ -8,17 +8,13 @@ use Drupal\commerce_payment\Entity\PaymentInterface;
 use Drupal\commerce_payment\PluginForm\PaymentOffsiteForm as BasePaymentOffsiteForm;
 use Drupal\commerce_product\Entity\ProductVariationInterface;
 use Drupal\commerce_sagepay\Plugin\Commerce\PaymentGateway\FormInterface;
-use Drupal\commerce_shipping\Entity\Shipment;
 use Drupal\commerce_shipping\Entity\ShipmentInterface;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Url;
-use Drupal\profile\Entity\ProfileInterface;
 use SagepayBasket;
 use SagepayCustomerDetails;
 use SagepayItem;
 use SagepayApiFactory;
-use SagepayCustomer;
-use SagepayFormApi;
 use SagepaySettings;
 
 /**
@@ -44,13 +40,14 @@ class FormForm extends BasePaymentOffsiteForm {
     $gatewayConfig = $paymentGatewayPlugin->getConfiguration();
 
     $sagepayConfig = SagepaySettings::getInstance([
+      'env' => ($gatewayConfig['mode']) ? $gatewayConfig['mode'] : SAGEPAY_ENV_TEST,
       'vendorName' => $gatewayConfig['vendor'],
       'website' => 'http://www.google.com',
       'formPassword' => [
-        'live' => $gatewayConfig['enc_key'],
-        'test' => $gatewayConfig['test_enc_key'],
+        SAGEPAY_ENV_LIVE => $gatewayConfig['enc_key'],
+        SAGEPAY_ENV_TEST => $gatewayConfig['test_enc_key'],
       ],
-      'siteFqdns' => ['test' => 'http://commerce.dd:8083/'],
+      'siteFqdns' => ['test' => 'http://commerce.dd:8083'],
 //      'formSuccessUrl' => $form['#return_url'],
       'formSuccessUrl' => $this->buildReturnUrl($order),
 //      'formFailureUrl' => $form['#cancel_url'],
@@ -64,7 +61,9 @@ class FormForm extends BasePaymentOffsiteForm {
 
     $redirectUrl = $paymentGatewayPlugin->getUrl();
 
-    $basket = $this->getBasketFromProducts($order);
+    if (!$basket = $this->getBasketFromProducts($order)) {
+      die('no basket');
+    }
 
     $basket->setDescription($gatewayConfig['sagepay_order_description']);
 
@@ -198,15 +197,10 @@ class FormForm extends BasePaymentOffsiteForm {
    */
   protected function getBasketFromProducts(OrderInterface $order) {
 
-
     // Check if we need to encode cart.
 //    if (isset($gatewayConfig['sagepay_send_basket_contents']) && $gatewayConfig['sagepay_send_basket_contents'] == '1') {
       $items = $order->getItems();
-
 //    }
-
-
-
 
     $basket = FALSE;
     // Create basket from saved products.

@@ -15,7 +15,6 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Form\FormStateInterface;
 use Symfony\Component\HttpFoundation\Request;
 
-
 /**
  * Provides the Sagepay Form Integration payment gateway.
  *
@@ -31,7 +30,7 @@ use Symfony\Component\HttpFoundation\Request;
  *     "amex", "discover", "mastercard", "visa",
  *   },
  *   modes = {
- *    "test" = "Test", "live" = "Live", "simulation" = "Simulation"
+ *    SAGEPAY_ENV_TEST = "Test", SAGEPAY_ENV_LIVE = "Live",
  *   },
  * )
  */
@@ -83,17 +82,17 @@ class Form extends OffsitePaymentGatewayBase implements FormInterface {
     ];
 
     $form['transaction']['sagepay_txn_prefix'] = [
-      '#type'          => 'textfield',
-      '#title'         => $this->t('Transaction Code Prefix'),
-      '#description'   => $this->t('This allows you to add an optional prefix to all transaction codes.'),
+      '#type' => 'textfield',
+      '#title' => $this->t('Transaction Code Prefix'),
+      '#description' => $this->t('This allows you to add an optional prefix to all transaction codes.'),
       '#default_value' => (isset($this->configuration['sagepay_txn_prefix'])) ? $this->configuration['sagepay_txn_prefix'] : '',
     ];
 
     $form['transaction']['sagepay_account_type'] = [
-      '#type'          => 'radios',
-      '#title'         => $this->t('Account Type'),
-      '#description'   => $this->t('This optional flag is used to tell the SAGE PAY System which merchant account to use.'),
-      '#options'       => [
+      '#type' => 'radios',
+      '#title' => $this->t('Account Type'),
+      '#description' => $this->t('This optional flag is used to tell the SAGE PAY System which merchant account to use.'),
+      '#options' => [
         'E' => $this->t('Use the e-commerce merchant account (default).'),
         'C' => $this->t('Use the continuous authority merchant account (if present).'),
         'M' => $this->t('Use the mail order, telephone order account (if present).'),
@@ -102,17 +101,17 @@ class Form extends OffsitePaymentGatewayBase implements FormInterface {
     ];
 
     $form['security'] = [
-      '#type'        => 'fieldset',
-      '#title'       => 'Security Checks',
+      '#type' => 'fieldset',
+      '#title' => 'Security Checks',
       '#collapsible' => TRUE,
-      '#collapsed'   => TRUE,
+      '#collapsed' => TRUE,
     ];
 
     $form['security']['sagepay_apply_avs_cv2'] = [
-      '#type'          => 'radios',
-      '#title'         => t('AVS / CV2 Mode'),
-      '#description'   => t('CV2 validation mode used by default on all transactions.'),
-      '#options'       => [
+      '#type' => 'radios',
+      '#title' => t('AVS / CV2 Mode'),
+      '#description' => t('CV2 validation mode used by default on all transactions.'),
+      '#options' => [
         '0' => t('If AVS/CV2 enabled then check them. If rules apply, use rules. (default)'),
         '1' => t('Force AVS/CV2 checks even if not enabled for the account. If rules apply, use rules.'),
         '2' => t('Force NO AVS/CV2 checks even if enabled on account.'),
@@ -121,29 +120,24 @@ class Form extends OffsitePaymentGatewayBase implements FormInterface {
       '#default_value' => (isset($this->configuration['sagepay_apply_avs_cv2'])) ? $this->configuration['sagepay_apply_avs_cv2'] : 0,
     ];
 
-    $form['security']['sagepay_apply_3d_secure'] = [
-      '#type'          => 'item',
-      '#title'        => t('3D Secure module not enabled.'),
-    ];
-
-    $form['order_settings'] = [
-      '#type'        => 'fieldset',
-      '#title'       => 'Order Settings',
-      '#collapsible' => TRUE,
-      '#collapsed'   => TRUE,
-    ];
-
-    $form['order_settings']['sagepay_send_basket_contents'] = [
-      '#type'          => 'select',
-      '#title'         => t('Send cart contents to SagePay'),
-      '#description'   => t('Send the order lines to SagePay as well as the order total.'),
-      '#options'       => [
-        '0' => t('Do not send basket contents'),
-        '1' => t('Send as text'),
-        '2' => t('Send as XML'),
-      ],
-      '#default_value' => (isset($this->configuration['sagepay_send_basket_contents'])) ? $this->configuration['sagepay_send_basket_contents'] : 0,
-    ];
+//    $form['order_settings'] = [
+//      '#type' => 'fieldset',
+//      '#title' => 'Order Settings',
+//      '#collapsible' => TRUE,
+//      '#collapsed' => TRUE,
+//    ];
+//
+//    $form['order_settings']['sagepay_send_basket_contents'] = [
+//      '#type' => 'select',
+//      '#title' => t('Send cart contents to SagePay'),
+//      '#description' => t('Send the order lines to SagePay as well as the order total.'),
+//      '#options' => [
+//        '0' => t('Do not send basket contents'),
+//        '1' => t('Send as text'),
+//        '2' => t('Send as XML'),
+//      ],
+//      '#default_value' => (isset($this->configuration['sagepay_send_basket_contents'])) ? $this->configuration['sagepay_send_basket_contents'] : 0,
+//    ];
 
     return $form;
   }
@@ -162,7 +156,7 @@ class Form extends OffsitePaymentGatewayBase implements FormInterface {
       $this->configuration['sagepay_txn_prefix'] = $values['transaction']['sagepay_txn_prefix'];
       $this->configuration['sagepay_account_type'] = $values['transaction']['sagepay_account_type'];
       $this->configuration['sagepay_apply_avs_cv2'] = $values['security']['sagepay_apply_avs_cv2'];
-      $this->configuration['sagepay_send_basket_contents'] = $values['order_settings']['sagepay_send_basket_contents'];
+//      $this->configuration['sagepay_send_basket_contents'] = $values['order_settings']['sagepay_send_basket_contents'];
     }
   }
 
@@ -193,18 +187,11 @@ class Form extends OffsitePaymentGatewayBase implements FormInterface {
    * {@inheritdoc}
    */
   public function getUrl() {
-
-    switch ($this->getMode()) {
-      case 'simulation':
-        return 'https://test.sagepay.com/Simulator/VSPFormGateway.asp';
-        break;
-      case 'live':
-        return 'https://live.sagepay.com/gateway/service/vspform-register.vsp';
-        break;
-      case 'test':
-      default:
-        return 'https://test.sagepay.com/gateway/service/vspform-register.vsp';
+    $url = SAGEPAY_FORM_SERVER_TEST;
+    if ($this->getMode() == SAGEPAY_ENV_LIVE) {
+      $url = SAGEPAY_FORM_SERVER_LIVE;
     }
+    return $url;
   }
 
   /**
@@ -303,16 +290,16 @@ class Form extends OffsitePaymentGatewayBase implements FormInterface {
         $payment->state = 'capture_completed';
         break;
 
-      case 'AUTHENTICATED':
-        \Drupal::logger('commerce_sagepay')
-          ->info('AUTHENTICATED Payment callback received from SagePay for order %order_id with status code %status', [
-            '%order_id' => $order->id(),
-            '%status' => $decryptedSagepayResponse['Status'],
-          ]);
-        $payment->remote_state = SAGEPAY_REMOTE_STATUS_AUTHENTICATE;
-//        $transaction_status = COMMERCE_PAYMENT_STATUS_SUCCESS;
-        $payment->state = 'capture_completed';
-        break;
+//      case 'AUTHENTICATED':
+//        \Drupal::logger('commerce_sagepay')
+//          ->info('AUTHENTICATED Payment callback received from SagePay for order %order_id with status code %status', [
+//            '%order_id' => $order->id(),
+//            '%status' => $decryptedSagepayResponse['Status'],
+//          ]);
+//        $payment->remote_state = SAGEPAY_REMOTE_STATUS_AUTHENTICATE;
+////        $transaction_status = COMMERCE_PAYMENT_STATUS_SUCCESS;
+//        $payment->state = 'capture_completed';
+//        break;
 
       case 'REGISTERED':
         \Drupal::logger('commerce_sagepay')
