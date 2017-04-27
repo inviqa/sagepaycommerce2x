@@ -23,7 +23,7 @@ use Symfony\Component\HttpFoundation\Request;
  *   label = @Translation("Sagepay (Form Integration)"),
  *   display_label = @Translation("Sagepay"),
  *    forms = {
- *     "offsite-payment" = "Drupal\commerce_sagepay\PluginForm\FormForm",
+ *     "offsite-payment" = "Drupal\commerce_sagepay\PluginForm\FormIntegrationForm",
  *   },
  *   payment_method_types = {"credit_card"},
  *   credit_card_types = {

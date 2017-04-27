@@ -18,9 +18,9 @@ use SagepayApiFactory;
 use SagepaySettings;
 
 /**
- * Class FormForm.
+ * Class FormIntegrationForm.
  */
-class FormForm extends BasePaymentOffsiteForm {
+class FormIntegrationForm extends BasePaymentOffsiteForm {
 
   /**
    * {@inheritdoc}
@@ -54,6 +54,7 @@ class FormForm extends BasePaymentOffsiteForm {
       'formFailureUrl' => $this->buildCancelUrl($order),
       'surcharges' => [],
       'allowGiftAid' => 0,
+      'logError' => FALSE,
     ]);
 
     /** @var \SagepayFormApi $api */
