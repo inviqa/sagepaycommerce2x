@@ -5,6 +5,10 @@
  * Contains commerce_sagepay.module.
  */
 
+define('COMMERCE_SAGEPAY_MODULE_PATH', dirname(__FILE__) . '/src');
+
+use Drupal\commerce_sagepay\HelperSetup;
+use Drupal\commerce_sagepay\SetupException;
 use Drupal\Core\Routing\RouteMatchInterface;
 
 /**
@@ -22,3 +26,62 @@ function commerce_sagepay_help($route_name, RouteMatchInterface $route_match) {
     default:
   }
 }
+
+/**
+ * Autoload class handler.
+ *
+ * @param string $class
+ */
+function commerce_sagepay_autoloader($class) {
+  $filepath = '';
+  for ($i = 0, $n = strlen($class); $i < $n; $i++) {
+    $char = $class[$i];
+    if (preg_match('/[A-Z]/', $char)) {
+      $char = '/' . strtolower($char);
+    }
+    $filepath .= $char;
+  }
+  $filename = COMMERCE_SAGEPAY_MODULE_PATH . $filepath . '.php';
+  if (file_exists($filename)) {
+    include $filename;
+  }
+}
+
+/**
+ * Exception handler function
+ *
+ * @param Exception $ex
+ */
+function commerce_sagepay_exception_handler(Exception $ex) {
+  SagepayUtil::log("Exception:" . $ex->getMessage() . PHP_EOL . $ex->getTraceAsString());
+  if ($ex instanceof SetupException) {
+
+    die('Setup error: '. $ex->getMessage());
+  }
+  else {
+    die('An unexpected error seems to have occurred.<br/> 
+            Try to refresh the page or you can contact us if the problem persist.');
+  }
+}
+
+spl_autoload_register('commerce_sagepay_autoloader');
+
+set_exception_handler('commerce_sagepay_exception_handler');
+
+require_once COMMERCE_SAGEPAY_MODULE_PATH . '/Sagepay/sagepay.php';
+
+if (!function_exists('url')) {
+
+  /**
+   * Define alias for HelperCommon::url
+   *
+   * @return string
+   */
+  function url() {
+    $args = func_get_args();
+    return call_user_func_array('HelperCommon::url', $args);
+  }
+
+}
+
+HelperSetup::checkDependencies();
