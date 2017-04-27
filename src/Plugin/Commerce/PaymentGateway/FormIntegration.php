@@ -34,7 +34,7 @@ use Symfony\Component\HttpFoundation\Request;
  *   },
  * )
  */
-class Form extends OffsitePaymentGatewayBase implements FormInterface {
+class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrationInterface {
 
   /**
    * {@inheritdoc}

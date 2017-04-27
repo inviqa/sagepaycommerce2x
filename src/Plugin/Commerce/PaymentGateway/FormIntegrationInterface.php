@@ -7,8 +7,8 @@ use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\SupportsAuthorization
 use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\SupportsRefundsInterface;
 
 /**
- * Interface FormInterface.
+ * Interface FormIntegrationInterface.
  */
-interface FormInterface extends OffsitePaymentGatewayInterface, SupportsRefundsInterface {
+interface FormIntegrationInterface extends OffsitePaymentGatewayInterface, SupportsRefundsInterface {
   public function getUrl();
 }
