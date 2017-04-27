@@ -9,6 +9,6 @@ use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\SupportsRefundsInterf
 /**
  * Interface FormIntegrationInterface.
  */
-interface FormIntegrationInterface extends OffsitePaymentGatewayInterface, SupportsRefundsInterface {
+interface FormIntegrationInterface extends OffsitePaymentGatewayInterface {
   public function getUrl();
 }
