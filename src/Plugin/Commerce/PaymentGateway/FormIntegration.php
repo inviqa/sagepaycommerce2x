@@ -38,16 +38,22 @@ use Symfony\Component\HttpFoundation\RequestStack;
 class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrationInterface {
 
   /**
+   * The request stack.
+   *
    * @var \Symfony\Component\HttpFoundation\RequestStack
    */
   private $requestStack;
 
   /**
+   * The logger factory.
+   *
    * @var \Drupal\Core\Logger\LoggerChannelFactoryInterface
    */
   private $loggerChannelFactory;
 
   /**
+   * The time service.
+   *
    * @var \Drupal\Component\Datetime\TimeInterface
    */
   private $time;
@@ -67,6 +73,12 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
    *   The payment type manager.
    * @param \Drupal\commerce_payment\PaymentMethodTypeManager $payment_method_type_manager
    *   The payment method type manager.
+   * @param \Symfony\Component\HttpFoundation\RequestStack $requestStack
+   *   The request stack.
+   * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $loggerChannelFactory
+   *   The logger factory.
+   * @param \Drupal\Component\Datetime\TimeInterface $time
+   *   The time service.
    */
   public function __construct(array $configuration, $plugin_id, $plugin_definition, EntityTypeManagerInterface $entity_type_manager, PaymentTypeManager $payment_type_manager, PaymentMethodTypeManager $payment_method_type_manager, RequestStack $requestStack, LoggerChannelFactoryInterface $loggerChannelFactory, TimeInterface $time) {
     parent::__construct($configuration, $plugin_id, $plugin_definition, $entity_type_manager, $payment_type_manager, $payment_method_type_manager);
@@ -104,8 +116,6 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
       '#default_value' => (isset($this->configuration['test_enc_key'])) ? $this->configuration['test_enc_key'] : '',
     ];
 
-    // Default transaction settings.
-    // These can be overriden using hook_sagepay_order_data_alter.
     $form['transaction'] = [
       '#type' => 'fieldset',
       '#title' => 'Transaction Settings',
@@ -159,25 +169,6 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
       '#default_value' => (isset($this->configuration['sagepay_apply_avs_cv2'])) ? $this->configuration['sagepay_apply_avs_cv2'] : 0,
     ];
 
-//    $form['order_settings'] = [
-//      '#type' => 'fieldset',
-//      '#title' => 'Order Settings',
-//      '#collapsible' => TRUE,
-//      '#collapsed' => TRUE,
-//    ];
-//
-//    $form['order_settings']['sagepay_send_basket_contents'] = [
-//      '#type' => 'select',
-//      '#title' => t('Send cart contents to SagePay'),
-//      '#description' => t('Send the order lines to SagePay as well as the order total.'),
-//      '#options' => [
-//        '0' => t('Do not send basket contents'),
-//        '1' => t('Send as text'),
-//        '2' => t('Send as XML'),
-//      ],
-//      '#default_value' => (isset($this->configuration['sagepay_send_basket_contents'])) ? $this->configuration['sagepay_send_basket_contents'] : 0,
-//    ];
-
     return $form;
   }
 
@@ -195,8 +186,18 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
       $this->configuration['sagepay_txn_prefix'] = $values['transaction']['sagepay_txn_prefix'];
       $this->configuration['sagepay_account_type'] = $values['transaction']['sagepay_account_type'];
       $this->configuration['sagepay_apply_avs_cv2'] = $values['security']['sagepay_apply_avs_cv2'];
-//      $this->configuration['sagepay_send_basket_contents'] = $values['order_settings']['sagepay_send_basket_contents'];
     }
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getUrl() {
+    $url = SAGEPAY_FORM_SERVER_TEST;
+    if ($this->getMode() == SAGEPAY_ENV_LIVE) {
+      $url = SAGEPAY_FORM_SERVER_LIVE;
+    }
+    return $url;
   }
 
   /**
@@ -206,7 +207,7 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
     $decryptedSagepayResponse = $this->decryptSagepayResponse($this->configuration['test_enc_key'], $this->requestStack->getCurrentRequest()->query->get('crypt'));
 
     if (!$decryptedSagepayResponse) {
-      die('couldnt decrypt sagepay response');
+      throw new PaymentGatewayException();
     }
 
     // Get and check the VendorTxCode.
@@ -245,17 +246,6 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
       drupal_set_message($sagepayError['drupalMessage'], $sagepayError['drupalMessageType']);
       throw new PaymentGatewayException('ERROR result from Sagepay for order ' . $decryptedSagepayResponse['VendorTxCode']);
     }
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  public function getUrl() {
-    $url = SAGEPAY_FORM_SERVER_TEST;
-    if ($this->getMode() == SAGEPAY_ENV_LIVE) {
-      $url = SAGEPAY_FORM_SERVER_LIVE;
-    }
-    return $url;
   }
 
   /**
