@@ -6,14 +6,15 @@ use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_payment\Entity\PaymentInterface;
 use Drupal\commerce_payment\Exception\PaymentGatewayException;
 use Drupal\commerce_payment\PaymentMethodTypeManager;
-use Drupal\commerce_payment\PaymentStorageInterface;
 use Drupal\commerce_payment\PaymentTypeManager;
 use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\OffsitePaymentGatewayBase;
-use Drupal\commerce_price\Price;
-use Drupal\commerce_sagepay\CommonHelper;
+use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Logger\LoggerChannelFactoryInterface;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
  * Provides the Sagepay Form Integration payment gateway.
@@ -35,6 +36,44 @@ use Symfony\Component\HttpFoundation\Request;
  * )
  */
 class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrationInterface {
+
+  /**
+   * @var \Symfony\Component\HttpFoundation\RequestStack
+   */
+  private $requestStack;
+
+  /**
+   * @var \Drupal\Core\Logger\LoggerChannelFactoryInterface
+   */
+  private $loggerChannelFactory;
+
+  /**
+   * @var \Drupal\Component\Datetime\TimeInterface
+   */
+  private $time;
+
+  /**
+   * Constructs a new PaymentGatewayBase object.
+   *
+   * @param array $configuration
+   *   A configuration array containing information about the plugin instance.
+   * @param string $plugin_id
+   *   The plugin_id for the plugin instance.
+   * @param mixed $plugin_definition
+   *   The plugin implementation definition.
+   * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entity_type_manager
+   *   The entity type manager.
+   * @param \Drupal\commerce_payment\PaymentTypeManager $payment_type_manager
+   *   The payment type manager.
+   * @param \Drupal\commerce_payment\PaymentMethodTypeManager $payment_method_type_manager
+   *   The payment method type manager.
+   */
+  public function __construct(array $configuration, $plugin_id, $plugin_definition, EntityTypeManagerInterface $entity_type_manager, PaymentTypeManager $payment_type_manager, PaymentMethodTypeManager $payment_method_type_manager, RequestStack $requestStack, LoggerChannelFactoryInterface $loggerChannelFactory, TimeInterface $time) {
+    parent::__construct($configuration, $plugin_id, $plugin_definition, $entity_type_manager, $payment_type_manager, $payment_method_type_manager);
+    $this->requestStack = $requestStack;
+    $this->loggerChannelFactory = $loggerChannelFactory;
+    $this->time = $time;
+  }
 
   /**
    * {@inheritdoc}
@@ -164,8 +203,48 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
    * {@inheritdoc}
    */
   public function onReturn(OrderInterface $order, Request $request) {
-    $decryptedSagepayResponse = $this->decryptSagepayResponse();
-    $this->createPayment($decryptedSagepayResponse, $order);
+    $decryptedSagepayResponse = $this->decryptSagepayResponse($this->configuration['test_enc_key'], $this->requestStack->getCurrentRequest()->query->get('crypt'));
+
+    if (!$decryptedSagepayResponse) {
+      die('couldnt decrypt sagepay response');
+    }
+
+    // Get and check the VendorTxCode.
+    $vendorTxCode = isset($decryptedSagepayResponse['VendorTxCode']) ? $decryptedSagepayResponse['VendorTxCode'] : FALSE;
+    if (empty($vendorTxCode)) {
+      $this->loggerChannelFactory->get('commerce_sagepay')
+        ->error('No VendorTxCode returned.');
+      throw new PaymentGatewayException('No VendorTxCode returned.');
+    }
+
+    if (FALSE && in_array($decryptedSagepayResponse['Status'], [
+      SAGEPAY_REMOTE_STATUS_OK,
+      SAGEPAY_REMOTE_STATUS_REGISTERED,
+    ])) {
+      $payment = $this->createPayment($decryptedSagepayResponse, $order);
+      $payment->remote_state = $decryptedSagepayResponse['Status'];
+      $payment->state = 'capture_completed';
+      $payment->save();
+      $logLevel = 'info';
+      $logMessage = 'OK Payment callback received from SagePay for order %order_id with status code %status';
+      $logContext = [
+        '%order_id' => $order->id(),
+        '%status' => $decryptedSagepayResponse['Status'],
+      ];
+
+      $this->loggerChannelFactory->get('commerce_sagepay')
+        ->log($logLevel, $logMessage, $logContext);
+    }
+    else {
+      $sagepayError = $this->decipherSagepayError($order, $decryptedSagepayResponse);
+      $logLevel = $sagepayError['logLevel'];
+      $logMessage = $sagepayError['logMessage'];
+      $logContext = $sagepayError['logContext'];
+      $this->loggerChannelFactory->get('commerce_sagepay')
+        ->log($logLevel, $logMessage, $logContext);
+      drupal_set_message($sagepayError['drupalMessage'], $sagepayError['drupalMessageType']);
+      throw new PaymentGatewayException('ERROR result from Sagepay for order ' . $decryptedSagepayResponse['VendorTxCode']);
+    }
   }
 
   /**
@@ -182,22 +261,15 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
   /**
    * Create a Commerce Payment from a Sagepay form request successful result.
    *
-   * @param  array $result
-   * @param  string $state
-   * @param  OrderInterface $order
-   * @param  string $remote_state
+   * @return PaymentInterface $payment
+   *    The commerce payment record.
    */
   public function createPayment(array $decryptedSagepayResponse, OrderInterface $order) {
-    // Get and check the VendorTxCode.
-    $vendorTxCode = isset($decryptedSagepayResponse['VendorTxCode']) ? $decryptedSagepayResponse['VendorTxCode'] : FALSE;
-    if (empty($vendorTxCode)) {
-      \Drupal::logger('commerce_sagepay')->error('No VendorTxCode returned.');
-      throw new PaymentGatewayException('No VendorTxCode returned.');
-    }
 
+    /** @var \Drupal\commerce_payment\PaymentStorageInterface $paymentStorage */
     $paymentStorage = $this->entityTypeManager->getStorage('commerce_payment');
 
-    $requestTime = \Drupal::service('commerce.time')->getRequestTime();
+    /** @var PaymentInterface $payment */
     $payment = $paymentStorage->create([
       'state' => 'authorization',
       'amount' => $order->getTotalPrice(),
@@ -206,123 +278,147 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
       'test' => $this->getMode() == 'test',
       'remote_id' => $decryptedSagepayResponse['VendorTxCode'],
       'remote_state' => SAGEPAY_REMOTE_STATUS_OK,
-      'authorized' => $requestTime,
+      'authorized' => $this->time->getRequestTime(),
     ]);
 
-    // Check for a valid status callback.
-    switch ($decryptedSagepayResponse['Status']) {
-      case 'ABORT':
-        \Drupal::logger('commerce_sagepay')
-          ->alert('ABORT error from SagePay for order %order_id with message %msg', [
-            '%order_id' => $order->id(),
-            '%msg' => $decryptedSagepayResponse['StatusDetail'],
-          ]);
-        drupal_set_message(t('Your SagePay transaction was aborted.'), 'error');
-        return FALSE;
+    $payment->save();
 
-      case 'NOTAUTHED':
-        \Drupal::logger('commerce_sagepay')
-          ->alert('NOTAUTHED error from SagePay for order %order_id with message %msg', [
-            '%order_id' => $order->id(),
-            '%msg' => $decryptedSagepayResponse['StatusDetail'],
-          ]);
-        drupal_set_message(t('Your transaction was not authorised by SagePay'), 'error');
-        return FALSE;
-
-      case 'REJECTED':
-        \Drupal::logger('commerce_sagepay')
-          ->alert('REJECTED error from SagePay for order %order_id with message %msg', [
-            '%order_id' => $order->id(),
-            '%msg' => $decryptedSagepayResponse['StatusDetail'],
-          ]);
-        drupal_set_message(t('Your transaction was rejected by SagePay'), 'error');
-        return FALSE;
-
-      case 'MALFORMED':
-        \Drupal::logger('commerce_sagepay')
-          ->alert('MALFORMED error from SagePay for order %order_id with message %msg', [
-            '%order_id' => $order->id(),
-            '%msg' => $decryptedSagepayResponse['StatusDetail'],
-          ]);
-        drupal_set_message(t('Sorry the transaction has failed.'), 'error');
-        return FALSE;
-
-      case 'INVALID':
-        \Drupal::logger('commerce_sagepay')
-          ->error('INVALID error from SagePay for order %order_id with message %msg', [
-            '%order_id' => $order->id(),
-            '%msg' => $decryptedSagepayResponse['StatusDetail'],
-          ]);
-        drupal_set_message(t('Sorry the transaction has failed.'), 'error');
-        return FALSE;
-
-      case 'ERROR':
-        \Drupal::logger('commerce_sagepay')
-          ->error('System ERROR from SagePay for order %order_id with message %msg', [
-            '%order_id' => $order->id(),
-            '%msg' => $decryptedSagepayResponse['StatusDetail'],
-          ]);
-        drupal_set_message(t('Sorry an error occurred while processing your transaction.'), 'error');
-        return FALSE;
-
-      case 'OK':
-        \Drupal::logger('commerce_sagepay')
-          ->info('OK Payment callback received from SagePay for order %order_id with status code %status', [
-            '%order_id' => $order->id(),
-            '%status' => $decryptedSagepayResponse['Status'],
-          ]);
-        $payment->remote_state = SAGEPAY_REMOTE_STATUS_OK;
-        $payment->state = 'capture_completed';
-        break;
-
-//      case 'AUTHENTICATED':
-//        \Drupal::logger('commerce_sagepay')
-//          ->info('AUTHENTICATED Payment callback received from SagePay for order %order_id with status code %status', [
-//            '%order_id' => $order->id(),
-//            '%status' => $decryptedSagepayResponse['Status'],
-//          ]);
-//        $payment->remote_state = SAGEPAY_REMOTE_STATUS_AUTHENTICATE;
-////        $transaction_status = COMMERCE_PAYMENT_STATUS_SUCCESS;
-//        $payment->state = 'capture_completed';
-//        break;
-
-      case 'REGISTERED':
-        \Drupal::logger('commerce_sagepay')
-          ->info('REGISTERED Payment callback received from SagePay for order %order_id with status code %status', [
-            '%order_id' => $order->id(),
-            '%status' => $decryptedSagepayResponse['Status'],
-          ]);
-        $payment->remote_state = SAGEPAY_REMOTE_STATUS_REGISTERED;
-//        $transaction_status = COMMERCE_PAYMENT_STATUS_PENDING;
-        $payment->state = 'capture_completed';
-        break;
-
-      default:
-        // If the status code is anything other than those above, log an error.
-        \Drupal::logger('commerce_sagepay')
-          ->error('Unrecognised Status response from SagePay for order %order_id (%response_code)', [
-            '%order_id' => $order->id(),
-            '%response_code' => $decryptedSagepayResponse['Status'],
-          ]);
-        return FALSE;
-
-    }
-
-    return $payment->save();
+    return $payment;
   }
 
   /**
+   * Decrypt the Sagepay response.
+   *
    * @return array
+   *    An array of the decrypted Sagepay response.
    */
-  private function decryptSagepayResponse() {
-    $formPassword = $this->configuration['test_enc_key'];
-    $encryptedResponse = \Drupal::request()->query->get('crypt');
+  private function decryptSagepayResponse($formPassword, $encryptedResponse) {
     $decrypt = \SagepayUtil::decryptAes($encryptedResponse, $formPassword);
     $decryptArray = \SagepayUtil::queryStringToArray($decrypt);
     if (!$decrypt || empty($decryptArray)) {
       throw new PaymentGatewayException('Crypt data missing for this Sagepay Form transaction.');
     }
     return $decryptArray;
+  }
+
+  /**
+   * Decipher the type of error returned by Sagepay.
+   *
+   * @param \Drupal\commerce_order\Entity\OrderInterface $order
+   *    The commerce order instance.
+   * @param array $decryptedSagepayResponse
+   *    The decrypted Sagepay response.
+   *
+   * @return array
+   *    The array of statuses and messages.
+   */
+  private function decipherSagepayError(OrderInterface $order, array $decryptedSagepayResponse = []) {
+
+    // Check for a valid status callback.
+    switch ($decryptedSagepayResponse['Status']) {
+      case 'ABORT':
+        $logLevel = 'alert';
+        $logMessage = 'ABORT error from SagePay for order %order_id with message %msg';
+        $logContext = [
+          '%order_id' => $order->id(),
+          '%msg' => $decryptedSagepayResponse['StatusDetail'],
+        ];
+        $drupalMessage = $this->t('Your SagePay transaction was aborted.');
+        $drupalMessageType = 'error';
+        break;
+
+      case 'NOTAUTHED':
+        $logLevel = 'alert';
+        $logMessage = 'NOTAUTHED error from SagePay for order %order_id with message %msg';
+        $logContext = [
+          '%order_id' => $order->id(),
+          '%msg' => $decryptedSagepayResponse['StatusDetail'],
+        ];
+        $drupalMessage = $this->t('Your transaction was not authorised by SagePay.');
+        $drupalMessageType = 'error';
+        break;
+
+      case 'REJECTED':
+        $logLevel = 'alert';
+        $logMessage = 'REJECTED error from SagePay for order %order_id with message %msg';
+        $logContext = [
+          '%order_id' => $order->id(),
+          '%msg' => $decryptedSagepayResponse['StatusDetail'],
+        ];
+        $drupalMessage = $this->t('Your transaction was rejected by SagePay.');
+        $drupalMessageType = 'error';
+        break;
+
+      case 'MALFORMED':
+        $logLevel = 'alert';
+        $logMessage = 'MALFORMED error from SagePay for order %order_id with message %msg';
+        $logContext = [
+          '%order_id' => $order->id(),
+          '%msg' => $decryptedSagepayResponse['StatusDetail'],
+        ];
+        $drupalMessage = $this->t('Sorry the transaction has failed.');
+        $drupalMessageType = 'error';
+        break;
+
+      case 'INVALID':
+        $logLevel = 'error';
+        $logMessage = 'INVALID error from SagePay for order %order_id with message %msg';
+        $logContext = [
+          '%order_id' => $order->id(),
+          '%msg' => $decryptedSagepayResponse['StatusDetail'],
+        ];
+        $drupalMessage = $this->t('Sorry the transaction has failed.');
+        $drupalMessageType = 'error';
+        break;
+
+      case 'ERROR':
+
+        $logLevel = 'error';
+        $logMessage = 'System ERROR from SagePay for order %order_id with message %msg';
+        $logContext = [
+          '%order_id' => $order->id(),
+          '%msg' => $decryptedSagepayResponse['StatusDetail'],
+        ];
+        $drupalMessage = $this->t('Sorry an error occurred while processing your transaction.');
+        $drupalMessageType = 'error';
+
+        break;
+
+      default:
+        $logLevel = 'error';
+        $logMessage = 'Unrecognised Status response from SagePay for order %order_id (%response_code)';
+        $logContext = [
+          '%order_id' => $order->id(),
+          '%msg' => $decryptedSagepayResponse['StatusDetail'],
+        ];
+        $drupalMessage = $this->t('Sorry an error occurred while processing your transaction.');
+        $drupalMessageType = 'error';
+    }
+
+    return [
+      'logLevel' => $logLevel,
+      'logMessage' => $logMessage,
+      'logContext' => $logContext,
+      'drupalMessage' => $drupalMessage,
+      'drupalMessageType' => $drupalMessageType,
+    ];
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
+    return new static(
+      $configuration,
+      $plugin_id,
+      $plugin_definition,
+      $container->get('entity_type.manager'),
+      $container->get('plugin.manager.commerce_payment_type'),
+      $container->get('plugin.manager.commerce_payment_method_type'),
+      $container->get('request_stack'),
+      $container->get('logger.factory'),
+      $container->get('datetime.time')
+    );
   }
 
 }
