@@ -217,7 +217,7 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
       throw new PaymentGatewayException('No VendorTxCode returned.');
     }
 
-    if (FALSE && in_array($decryptedSagepayResponse['Status'], [
+    if (in_array($decryptedSagepayResponse['Status'], [
       SAGEPAY_REMOTE_STATUS_OK,
       SAGEPAY_REMOTE_STATUS_REGISTERED,
     ])) {
