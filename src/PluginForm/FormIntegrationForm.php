@@ -119,7 +119,6 @@ class FormIntegrationForm extends BasePaymentOffsiteForm {
         }
       }
       $basket->setDeliveryNetAmount($delivery);
-//    $basket->setDeliveryTaxAmount(0.05);
     }
 
     $request = $sagepayFormApi->createRequest();
