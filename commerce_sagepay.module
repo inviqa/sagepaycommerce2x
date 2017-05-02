@@ -29,8 +29,6 @@ function commerce_sagepay_help($route_name, RouteMatchInterface $route_match) {
 
 /**
  * Autoload class handler.
- *
- * @param string $class
  */
 function commerce_sagepay_autoloader($class) {
   $filepath = '';
@@ -48,19 +46,19 @@ function commerce_sagepay_autoloader($class) {
 }
 
 /**
- * Exception handler function
- *
- * @param Exception $ex
+ * Exception handler function.
  */
 function commerce_sagepay_exception_handler(Exception $ex) {
   SagepayUtil::log("Exception:" . $ex->getMessage() . PHP_EOL . $ex->getTraceAsString());
   if ($ex instanceof SetupException) {
-
-    die('Setup error: '. $ex->getMessage());
+    die('Setup error: ' . $ex->getMessage());
   }
   else {
-    die('An unexpected error seems to have occurred.<br/> 
-            Try to refresh the page or you can contact us if the problem persist.');
+
+    die(
+        'An unexpected error seems to have occurred.<br/> 
+            Try to refresh the page or you can contact us if the problem persist.' . $ex->getMessage()
+    );
   }
 }
 
@@ -73,15 +71,13 @@ require_once COMMERCE_SAGEPAY_MODULE_PATH . '/Sagepay/sagepay.php';
 if (!function_exists('url')) {
 
   /**
-   * Define alias for HelperCommon::url
-   *
-   * @return string
+   * Define alias for HelperCommon::url.
    */
   function url() {
+
     $args = func_get_args();
     return call_user_func_array('HelperCommon::url', $args);
   }
 
 }
-
 HelperSetup::checkDependencies();
