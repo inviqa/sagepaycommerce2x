@@ -8,9 +8,9 @@ use Drupal\commerce_payment\Exception\PaymentGatewayException;
 use Drupal\commerce_payment\PaymentMethodTypeManager;
 use Drupal\commerce_payment\PaymentTypeManager;
 use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\OffsitePaymentGatewayBase;
-use Drupal\commerce_shipping\Entity\ShipmentInterface;
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Drupal\Core\Url;
@@ -65,6 +65,13 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
   private $time;
 
   /**
+   * The module handler service.
+   *
+   * @var \Drupal\Core\Extension\ModuleHandlerInterface
+   */
+  private $moduleHandler;
+
+  /**
    * Constructs a new PaymentGatewayBase object.
    *
    * @param array $configuration
@@ -85,12 +92,15 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
    *   The logger factory.
    * @param \Drupal\Component\Datetime\TimeInterface $time
    *   The time service.
+   * @param \Drupal\Core\Extension\ModuleHandlerInterface $moduleHandler
+   *   The module handler service.
    */
-  public function __construct(array $configuration, $plugin_id, $plugin_definition, EntityTypeManagerInterface $entity_type_manager, PaymentTypeManager $payment_type_manager, PaymentMethodTypeManager $payment_method_type_manager, RequestStack $requestStack, LoggerChannelFactoryInterface $loggerChannelFactory, TimeInterface $time) {
+  public function __construct(array $configuration, $plugin_id, $plugin_definition, EntityTypeManagerInterface $entity_type_manager, PaymentTypeManager $payment_type_manager, PaymentMethodTypeManager $payment_method_type_manager, RequestStack $requestStack, LoggerChannelFactoryInterface $loggerChannelFactory, TimeInterface $time, ModuleHandlerInterface $moduleHandler) {
     parent::__construct($configuration, $plugin_id, $plugin_definition, $entity_type_manager, $payment_type_manager, $payment_method_type_manager);
     $this->requestStack = $requestStack;
     $this->loggerChannelFactory = $loggerChannelFactory;
     $this->time = $time;
+    $this->moduleHandler = $moduleHandler;
   }
 
   /**
@@ -279,134 +289,56 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
   }
 
   /**
-   * Decipher the type of error returned by Sagepay.
-   *
-   * @param \Drupal\commerce_order\Entity\OrderInterface $order
-   *    The commerce order instance.
-   * @param array $decryptedSagepayResponse
-   *    The decrypted Sagepay response.
-   *
-   * @return array
-   *    The array of statuses and messages.
+   * {@inheritdoc}
    */
-  private function decipherSagepayError(OrderInterface $order, array $decryptedSagepayResponse = []) {
+  public function buildTransaction(PaymentInterface $payment) {
+    /** @var OrderInterface $order */
+    $order = $payment->getOrder();
+    $sagepayFormApi = $this->getSagepayApi($order);
 
-    // Check for a valid status callback.
-    switch ($decryptedSagepayResponse['Status']) {
-      case 'ABORT':
-        $logLevel = 'alert';
-        $logMessage = 'ABORT error from SagePay for order %order_id with message %msg';
-        $logContext = [
-          '%order_id' => $order->id(),
-          '%msg' => $decryptedSagepayResponse['StatusDetail'],
-        ];
-        $drupalMessage = $this->t('Your SagePay transaction was aborted.');
-        $drupalMessageType = 'error';
-        break;
-
-      case 'NOTAUTHED':
-        $logLevel = 'alert';
-        $logMessage = 'NOTAUTHED error from SagePay for order %order_id with message %msg';
-        $logContext = [
-          '%order_id' => $order->id(),
-          '%msg' => $decryptedSagepayResponse['StatusDetail'],
-        ];
-        $drupalMessage = $this->t('Your transaction was not authorised by SagePay.');
-        $drupalMessageType = 'error';
-        break;
-
-      case 'REJECTED':
-        $logLevel = 'alert';
-        $logMessage = 'REJECTED error from SagePay for order %order_id with message %msg';
-        $logContext = [
-          '%order_id' => $order->id(),
-          '%msg' => $decryptedSagepayResponse['StatusDetail'],
-        ];
-        $drupalMessage = $this->t('Your transaction was rejected by SagePay.');
-        $drupalMessageType = 'error';
-        break;
-
-      case 'MALFORMED':
-        $logLevel = 'alert';
-        $logMessage = 'MALFORMED error from SagePay for order %order_id with message %msg';
-        $logContext = [
-          '%order_id' => $order->id(),
-          '%msg' => $decryptedSagepayResponse['StatusDetail'],
-        ];
-        $drupalMessage = $this->t('Sorry the transaction has failed.');
-        $drupalMessageType = 'error';
-        break;
-
-      case 'INVALID':
-        $logLevel = 'error';
-        $logMessage = 'INVALID error from SagePay for order %order_id with message %msg';
-        $logContext = [
-          '%order_id' => $order->id(),
-          '%msg' => $decryptedSagepayResponse['StatusDetail'],
-        ];
-        $drupalMessage = $this->t('Sorry the transaction has failed.');
-        $drupalMessageType = 'error';
-        break;
-
-      case 'ERROR':
-
-        $logLevel = 'error';
-        $logMessage = 'System ERROR from SagePay for order %order_id with message %msg';
-        $logContext = [
-          '%order_id' => $order->id(),
-          '%msg' => $decryptedSagepayResponse['StatusDetail'],
-        ];
-        $drupalMessage = $this->t('Sorry an error occurred while processing your transaction.');
-        $drupalMessageType = 'error';
-
-        break;
-
-      default:
-        $logLevel = 'error';
-        $logMessage = 'Unrecognised Status response from SagePay for order %order_id (%response_code)';
-        $logContext = [
-          '%order_id' => $order->id(),
-          '%msg' => $decryptedSagepayResponse['StatusDetail'],
-        ];
-        $drupalMessage = $this->t('Sorry an error occurred while processing your transaction.');
-        $drupalMessageType = 'error';
+    if (!$basket = $this->getBasketFromProducts($order)) {
+      throw new PaymentGatewayException('No basket found');
     }
 
-    return [
-      'logLevel' => $logLevel,
-      'logMessage' => $logMessage,
-      'logContext' => $logContext,
-      'drupalMessage' => $drupalMessage,
-      'drupalMessageType' => $drupalMessageType,
-    ];
+    $basket->setDescription($this->configuration['sagepay_order_description']);
+    $sagepayFormApi->setBasket($basket);
+
+    $sagepayFormApi->addAddress($this->getBillingAddress($order));
+
+    if ($this->moduleHandler->moduleExists('commerce_shipping')) {
+      /** @var \Drupal\commerce_shipping\Entity\ShipmentInterface[] $shipments */
+      $shipments = $order->get('shipments')->referencedEntities();
+
+      $delivery = 0;
+      if (!empty(($shipments)) && $shippingAddress = $this->getShippingAddress(reset($shipments))) {
+        $sagepayFormApi->addAddress($shippingAddress);
+
+        foreach ($shipments as $shipment) {
+          $delivery = $delivery + (float) $shipment->getAmount()->getNumber();
+        }
+      }
+      $basket->setDeliveryNetAmount($delivery);
+    }
+
+    $request = $sagepayFormApi->createRequest();
+
+    $order->setData('sagepay_form', [
+      'request' => $request,
+    ]);
+
+    $order->save();
+
+    return $request;
   }
 
   /**
-   * {@inheritdoc}
+   * Get the Sagepay API.
+   *
+   * @return \SagepayAbstractApi
+   *   The Sagepay form api object.
    */
-  public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
-    return new static(
-      $configuration,
-      $plugin_id,
-      $plugin_definition,
-      $container->get('entity_type.manager'),
-      $container->get('plugin.manager.commerce_payment_type'),
-      $container->get('plugin.manager.commerce_payment_method_type'),
-      $container->get('request_stack'),
-      $container->get('logger.factory'),
-      $container->get('datetime.time')
-    );
-  }
-
-  public function buildTransaction(PaymentInterface $payment) {
-
-    /** @var OrderInterface $order */
-    $order = $payment->getOrder();
-
-    /** @var FormIntegrationInterface $paymentGatewayPlugin */
-    $paymentGatewayPlugin = $payment->getPaymentGateway()->getPlugin();
-
-    $gatewayConfig = $paymentGatewayPlugin->getConfiguration();
+  protected function getSagepayApi(OrderInterface $order) {
+    $gatewayConfig = $this->getConfiguration();
 
     $sagepayConfig = SagepaySettings::getInstance([
       'env' => ($gatewayConfig['mode']) ? $gatewayConfig['mode'] : SAGEPAY_ENV_TEST,
@@ -425,75 +357,7 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
       'ApplyAVSCV2' => $gatewayConfig['sagepay_apply_avs_cv2'],
     ]);
 
-    /** @var \SagepayFormApi $api */
-    $sagepayFormApi = SagepayApiFactory::create('form', $sagepayConfig);
-
-    $redirectUrl = $paymentGatewayPlugin->getUrl();
-
-    if (!$basket = $this->getBasketFromProducts($order)) {
-      die('no basket');
-    }
-
-    $basket->setDescription($gatewayConfig['sagepay_order_description']);
-
-    $sagepayFormApi->setBasket($basket);
-
-    /** @var \Drupal\address\Plugin\Field\FieldType\AddressItem $address */
-    $billingAddress = $order->getBillingProfile()->get('address')->first();
-
-    $billingDetails = [
-      'BillingFirstnames' => $billingAddress->getGivenName(),
-      'BillingSurname' => $billingAddress->getFamilyName(),
-      'BillingAddress1' => $billingAddress->getAddressLine1(),
-      'BillingAddress2' => $billingAddress->getAddressLine2(),
-      'BillingCity' => $billingAddress->getLocality(),
-      'BillingPostCode' => $billingAddress->getPostalCode(),
-      'BillingCountry' => $billingAddress->getCountryCode(),
-    ];
-
-    $address1 = $this->createCustomerDetails($billingDetails, 'billing');
-    $sagepayFormApi->addAddress($address1);
-    $moduleHandler = \Drupal::service('module_handler');
-    if ($moduleHandler->moduleExists('commerce_shipping')) {
-      /** @var \Drupal\commerce_shipping\Entity\ShipmentInterface[] $shipments */
-      $shipments = $order->get('shipments')->referencedEntities();
-      /** @var ShipmentInterface $shipment */
-      $delivery = 0;
-      if (!empty(($shipments))) {
-
-        $first_shipment = reset($shipments);
-        if ($shippingProfile = $first_shipment->getShippingProfile()) {
-          /** @var \Drupal\address\Plugin\Field\FieldType\AddressItem $address */
-          $shippingAddress = $shippingProfile->get('address')->first();
-          $shippingDetails = [
-            'DeliveryFirstnames' => $shippingAddress->getGivenName(),
-            'DeliverySurname' => $shippingAddress->getFamilyName(),
-            'DeliveryAddress1' => $shippingAddress->getAddressLine1(),
-            'DeliveryAddress2' => $shippingAddress->getAddressLine2(),
-            'DeliveryCity' => $shippingAddress->getLocality(),
-            'DeliveryPostCode' => $shippingAddress->getPostalCode(),
-            'DeliveryCountry' => $shippingAddress->getCountryCode(),
-          ];
-
-          $address2 = $this->createCustomerDetails($shippingDetails, 'delivery');
-          $sagepayFormApi->addAddress($address2);
-        }
-
-        foreach ($shipments as $shipment) {
-          $delivery = $delivery + (float) $shipment->getAmount()->getNumber();
-        }
-      }
-      $basket->setDeliveryNetAmount($delivery);
-    }
-
-    $request = $sagepayFormApi->createRequest();
-
-    $order->setData('sagepay_form', [
-      'request' => $request,
-    ]);
-    $order->save();
-
-    return $request;
+    return SagepayApiFactory::create('form', $sagepayConfig);
   }
 
   /**
@@ -526,6 +390,24 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
       'commerce_order' => $order->id(),
       'step' => 'payment',
     ], ['absolute' => FALSE])->toString();
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
+    return new static(
+      $configuration,
+      $plugin_id,
+      $plugin_definition,
+      $container->get('entity_type.manager'),
+      $container->get('plugin.manager.commerce_payment_type'),
+      $container->get('plugin.manager.commerce_payment_method_type'),
+      $container->get('request_stack'),
+      $container->get('logger.factory'),
+      $container->get('datetime.time'),
+      $container->get('module_handler')
+    );
   }
 
 }

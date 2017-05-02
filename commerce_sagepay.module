@@ -48,7 +48,7 @@ function commerce_sagepay_autoloader($class) {
 /**
  * Exception handler function.
  */
-function commerce_sagepay_exception_handler(Exception $ex) {
+function commerce_sagepay_exception_handler($ex) {
   SagepayUtil::log("Exception:" . $ex->getMessage() . PHP_EOL . $ex->getTraceAsString());
   if ($ex instanceof SetupException) {
     die('Setup error: ' . $ex->getMessage());

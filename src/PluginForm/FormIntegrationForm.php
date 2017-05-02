@@ -3,15 +3,11 @@
 namespace Drupal\commerce_sagepay\PluginForm;
 
 use Drupal\commerce_order\Entity\OrderInterface;
-use Drupal\commerce_payment\Entity\PaymentInterface;
 use Drupal\commerce_payment\PluginForm\PaymentOffsiteForm as BasePaymentOffsiteForm;
 use Drupal\commerce_sagepay\Plugin\Commerce\PaymentGateway\FormIntegrationInterface;
 use Drupal\commerce_sagepay\Plugin\Commerce\PaymentGateway\FormInterface;
-use Drupal\commerce_shipping\Entity\ShipmentInterface;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Url;
-use SagepayApiFactory;
-use SagepaySettings;
 
 /**
  * Class FormIntegrationForm.
@@ -27,7 +23,8 @@ class FormIntegrationForm extends BasePaymentOffsiteForm {
 
     /** @var \Drupal\commerce_payment\Entity\PaymentInterface $payment */
     $payment = $this->entity;
-    /** @var FormIntegrationInterface $payment_gateway_plugin */
+
+    /** @var FormIntegrationInterface $paymentGatewayPlugin */
     $paymentGatewayPlugin = $payment->getPaymentGateway()->getPlugin();
 
     $request = $paymentGatewayPlugin->buildTransaction($payment);
@@ -38,8 +35,7 @@ class FormIntegrationForm extends BasePaymentOffsiteForm {
       }
     }
 
-    $redirectUrl = $paymentGatewayPlugin->getUrl();
-    return $this->buildRedirectForm($form, $form_state, $redirectUrl, $request, BasePaymentOffsiteForm::REDIRECT_POST);
+    return $this->buildRedirectForm($form, $form_state, $paymentGatewayPlugin->getUrl(), $request, BasePaymentOffsiteForm::REDIRECT_POST);
   }
 
   /**
