@@ -16,8 +16,13 @@ use SagepayItem;
 trait SagepayCommon {
 
   /**
-   * @param $order
+   * Get the billing address for this order.
+   *
+   * @param OrderInterface $order
+   *   The commerce order object.
+   *
    * @return \SagepayCustomerDetails
+   *   The sagepay customer details object.
    */
   private function getBillingAddress(OrderInterface $order) {
     /** @var \Drupal\address\Plugin\Field\FieldType\AddressItem $address */
@@ -37,8 +42,14 @@ trait SagepayCommon {
   }
 
   /**
+   * Get the shipping address to pass to Sagepay.
+   *
    * @param \Drupal\commerce_shipping\Entity\ShipmentInterface $shipment
+   *   The commerce shipment entity.
+   *
    * @return bool|\SagepayCustomerDetails
+   *   Return false if no shipping profile. Otherwise return the shipping
+   *   customer details.
    */
   protected function getShippingAddress(ShipmentInterface $shipment) {
 

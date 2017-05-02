@@ -2,12 +2,10 @@
 
 namespace Drupal\commerce_sagepay\PluginForm;
 
-use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_payment\PluginForm\PaymentOffsiteForm as BasePaymentOffsiteForm;
 use Drupal\commerce_sagepay\Plugin\Commerce\PaymentGateway\FormIntegrationInterface;
 use Drupal\commerce_sagepay\Plugin\Commerce\PaymentGateway\FormInterface;
 use Drupal\Core\Form\FormStateInterface;
-use Drupal\Core\Url;
 
 /**
  * Class FormIntegrationForm.
@@ -36,38 +34,6 @@ class FormIntegrationForm extends BasePaymentOffsiteForm {
     }
 
     return $this->buildRedirectForm($form, $form_state, $paymentGatewayPlugin->getUrl(), $request, BasePaymentOffsiteForm::REDIRECT_POST);
-  }
-
-  /**
-   * Builds the URL to the "return" page.
-   *
-   * @param \Drupal\commerce_order\Entity\OrderInterface $order
-   *   The order.
-   *
-   * @return string
-   *   The "return" page url.
-   */
-  protected function buildReturnUrl(OrderInterface $order) {
-    return Url::fromRoute('commerce_payment.checkout.return', [
-      'commerce_order' => $order->id(),
-      'step' => 'payment',
-    ], ['absolute' => FALSE])->toString();
-  }
-
-  /**
-   * Builds the URL to the "cancel" page.
-   *
-   * @param \Drupal\commerce_order\Entity\OrderInterface $order
-   *   The order.
-   *
-   * @return string
-   *   The "cancel" page url.
-   */
-  protected function buildCancelUrl(OrderInterface $order) {
-    return Url::fromRoute('commerce_payment.checkout.cancel', [
-      'commerce_order' => $order->id(),
-      'step' => 'payment',
-    ], ['absolute' => FALSE])->toString();
   }
 
 }
