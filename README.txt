@@ -2,7 +2,10 @@ CONTENTS OF THIS FILE
 ---------------------
 
  * Introduction
+ * Requirements
  * Installation
+ * Support
+ * Sponsorship
 
 
 INTRODUCTION
@@ -29,3 +32,16 @@ INSTALLATION
 * Enable the module under /admin/modules within the group 'Commerce (contrib)'.
 * Add a new Payment gateway under 'admin/commerce/config/payment-gateways'
   - You will need your Sagepay Vendor Name and encryption keys for your Test and Live environments.
+
+SUPPORT
+-------
+
+If the encounter any issues, please file a support request
+at http://drupal.org/project/issues/commerce_sagepay
+
+
+SPONSORSHIP
+-----------
+
+This module is sponsored by Sage Pay (http://www.sagepay.com) and developed
+by Inviqa (http://www.inviqa.com), a SagePay partner.
