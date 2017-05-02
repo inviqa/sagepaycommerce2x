@@ -28,5 +28,4 @@ INSTALLATION
   https://www.drupal.org/docs/8/extending-drupal-8/installing-modules-composer-dependencies
 * Enable the module under /admin/modules within the group 'Commerce (contrib)'.
 * Add a new Payment gateway under 'admin/commerce/config/payment-gateways'
-  - You will need your Sagepay Vendor Name and encryption keys for your
-  - Test and Live environments.
+  - You will need your Sagepay Vendor Name and encryption keys for your Test and Live environments.
