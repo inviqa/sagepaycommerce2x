@@ -11,7 +11,9 @@ CONTENTS OF THIS FILE
 INTRODUCTION
 ------------
 
-This module allows Drupal Commerce customers to pay using the Sagepay Form integration.
+This module allows Drupal Commerce customers to pay using the
+Sagepay Form integration.
+
 https://www.sagepay.co.uk/support/12/36/sage-pay-form
 
 
@@ -23,6 +25,7 @@ This module requires the following:
   - Commerce Payment (and its dependencies);
 * Sagepay Merchant account (https://applications.sagepay.com/apply).
 
+
 INSTALLATION
 ------------
 * This module needs to be installed via Composer, which will download
@@ -31,7 +34,8 @@ INSTALLATION
   https://www.drupal.org/docs/8/extending-drupal-8/installing-modules-composer-dependencies
 * Enable the module under /admin/modules within the group 'Commerce (contrib)'.
 * Add a new Payment gateway under 'admin/commerce/config/payment-gateways'
-  - You will need your Sagepay Vendor Name and encryption keys for your Test and Live environments.
+  - You will need your Sagepay Vendor Name and encryption keys for your
+    Test and Live environments.
 
 SUPPORT
 -------
