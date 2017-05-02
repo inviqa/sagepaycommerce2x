@@ -8,10 +8,14 @@ use Drupal\commerce_payment\Exception\PaymentGatewayException;
 use Drupal\commerce_payment\PaymentMethodTypeManager;
 use Drupal\commerce_payment\PaymentTypeManager;
 use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\OffsitePaymentGatewayBase;
+use Drupal\commerce_shipping\Entity\ShipmentInterface;
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
+use Drupal\Core\Url;
+use SagepayApiFactory;
+use SagepaySettings;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -36,6 +40,8 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * )
  */
 class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrationInterface {
+
+  use SagepayCommon;
 
   /**
    * The request stack.
@@ -107,6 +113,7 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
       '#title' => t('Encryption Key'),
       '#description' => t('If you have requested form based integration, you will have received an encryption key from SagePay in a separate email.'),
       '#default_value' => (isset($this->configuration['enc_key'])) ? $this->configuration['enc_key'] : '',
+      '#required' => TRUE,
     ];
 
     $form['test_enc_key'] = [
@@ -114,6 +121,7 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
       '#title' => t('Test Mode Encryption Key'),
       '#description' => t('If you have requested form based integration, you will have received an encryption key from SagePay in a separate email. The encryption key for the test server is different to the one used in your production environment.'),
       '#default_value' => (isset($this->configuration['test_enc_key'])) ? $this->configuration['test_enc_key'] : '',
+      '#required' => TRUE,
     ];
 
     $form['transaction'] = [
@@ -128,25 +136,6 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
       '#title' => t('Order Description'),
       '#description' => $this->t('The description of the order that will appear in the SagePay transaction. (For example, Your order from sitename.com)'),
       '#default_value' => (isset($this->configuration['sagepay_order_description'])) ? $this->configuration['sagepay_order_description'] : $this->t('Your order from sitename.com'),
-    ];
-
-    $form['transaction']['sagepay_txn_prefix'] = [
-      '#type' => 'textfield',
-      '#title' => $this->t('Transaction Code Prefix'),
-      '#description' => $this->t('This allows you to add an optional prefix to all transaction codes.'),
-      '#default_value' => (isset($this->configuration['sagepay_txn_prefix'])) ? $this->configuration['sagepay_txn_prefix'] : '',
-    ];
-
-    $form['transaction']['sagepay_account_type'] = [
-      '#type' => 'radios',
-      '#title' => $this->t('Account Type'),
-      '#description' => $this->t('This optional flag is used to tell the SAGE PAY System which merchant account to use.'),
-      '#options' => [
-        'E' => $this->t('Use the e-commerce merchant account (default).'),
-        'C' => $this->t('Use the continuous authority merchant account (if present).'),
-        'M' => $this->t('Use the mail order, telephone order account (if present).'),
-      ],
-      '#default_value' => (isset($this->configuration['sagepay_account_type'])) ? $this->configuration['sagepay_account_type'] : 'E',
     ];
 
     $form['security'] = [
@@ -183,8 +172,6 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
       $this->configuration['enc_key'] = $values['enc_key'];
       $this->configuration['test_enc_key'] = $values['test_enc_key'];
       $this->configuration['sagepay_order_description'] = $values['transaction']['sagepay_order_description'];
-      $this->configuration['sagepay_txn_prefix'] = $values['transaction']['sagepay_txn_prefix'];
-      $this->configuration['sagepay_account_type'] = $values['transaction']['sagepay_account_type'];
       $this->configuration['sagepay_apply_avs_cv2'] = $values['security']['sagepay_apply_avs_cv2'];
     }
   }
@@ -409,6 +396,136 @@ class FormIntegration extends OffsitePaymentGatewayBase implements FormIntegrati
       $container->get('logger.factory'),
       $container->get('datetime.time')
     );
+  }
+
+  public function buildTransaction(PaymentInterface $payment) {
+
+    /** @var OrderInterface $order */
+    $order = $payment->getOrder();
+
+    /** @var FormIntegrationInterface $paymentGatewayPlugin */
+    $paymentGatewayPlugin = $payment->getPaymentGateway()->getPlugin();
+
+    $gatewayConfig = $paymentGatewayPlugin->getConfiguration();
+
+    $sagepayConfig = SagepaySettings::getInstance([
+      'env' => ($gatewayConfig['mode']) ? $gatewayConfig['mode'] : SAGEPAY_ENV_TEST,
+      'vendorName' => $gatewayConfig['vendor'],
+      'website' => 'http://www.google.com',
+      'formPassword' => [
+        SAGEPAY_ENV_LIVE => $gatewayConfig['enc_key'],
+        SAGEPAY_ENV_TEST => $gatewayConfig['test_enc_key'],
+      ],
+      'siteFqdns' => ['test' => 'http://commerce.dd:8083'],
+      'formSuccessUrl' => $this->buildReturnUrl($order),
+      'formFailureUrl' => $this->buildCancelUrl($order),
+      'surcharges' => [],
+      'allowGiftAid' => 0,
+      'logError' => FALSE,
+      'ApplyAVSCV2' => $gatewayConfig['sagepay_apply_avs_cv2'],
+    ]);
+
+    /** @var \SagepayFormApi $api */
+    $sagepayFormApi = SagepayApiFactory::create('form', $sagepayConfig);
+
+    $redirectUrl = $paymentGatewayPlugin->getUrl();
+
+    if (!$basket = $this->getBasketFromProducts($order)) {
+      die('no basket');
+    }
+
+    $basket->setDescription($gatewayConfig['sagepay_order_description']);
+
+    $sagepayFormApi->setBasket($basket);
+
+    /** @var \Drupal\address\Plugin\Field\FieldType\AddressItem $address */
+    $billingAddress = $order->getBillingProfile()->get('address')->first();
+
+    $billingDetails = [
+      'BillingFirstnames' => $billingAddress->getGivenName(),
+      'BillingSurname' => $billingAddress->getFamilyName(),
+      'BillingAddress1' => $billingAddress->getAddressLine1(),
+      'BillingAddress2' => $billingAddress->getAddressLine2(),
+      'BillingCity' => $billingAddress->getLocality(),
+      'BillingPostCode' => $billingAddress->getPostalCode(),
+      'BillingCountry' => $billingAddress->getCountryCode(),
+    ];
+
+    $address1 = $this->createCustomerDetails($billingDetails, 'billing');
+    $sagepayFormApi->addAddress($address1);
+    $moduleHandler = \Drupal::service('module_handler');
+    if ($moduleHandler->moduleExists('commerce_shipping')) {
+      /** @var \Drupal\commerce_shipping\Entity\ShipmentInterface[] $shipments */
+      $shipments = $order->get('shipments')->referencedEntities();
+      /** @var ShipmentInterface $shipment */
+      $delivery = 0;
+      if (!empty(($shipments))) {
+
+        $first_shipment = reset($shipments);
+        if ($shippingProfile = $first_shipment->getShippingProfile()) {
+          /** @var \Drupal\address\Plugin\Field\FieldType\AddressItem $address */
+          $shippingAddress = $shippingProfile->get('address')->first();
+          $shippingDetails = [
+            'DeliveryFirstnames' => $shippingAddress->getGivenName(),
+            'DeliverySurname' => $shippingAddress->getFamilyName(),
+            'DeliveryAddress1' => $shippingAddress->getAddressLine1(),
+            'DeliveryAddress2' => $shippingAddress->getAddressLine2(),
+            'DeliveryCity' => $shippingAddress->getLocality(),
+            'DeliveryPostCode' => $shippingAddress->getPostalCode(),
+            'DeliveryCountry' => $shippingAddress->getCountryCode(),
+          ];
+
+          $address2 = $this->createCustomerDetails($shippingDetails, 'delivery');
+          $sagepayFormApi->addAddress($address2);
+        }
+
+        foreach ($shipments as $shipment) {
+          $delivery = $delivery + (float) $shipment->getAmount()->getNumber();
+        }
+      }
+      $basket->setDeliveryNetAmount($delivery);
+    }
+
+    $request = $sagepayFormApi->createRequest();
+
+    $order->setData('sagepay_form', [
+      'request' => $request,
+    ]);
+    $order->save();
+
+    return $request;
+  }
+
+  /**
+   * Builds the URL to the "return" page.
+   *
+   * @param \Drupal\commerce_order\Entity\OrderInterface $order
+   *   The order.
+   *
+   * @return string
+   *   The "return" page url.
+   */
+  protected function buildReturnUrl(OrderInterface $order) {
+    return Url::fromRoute('commerce_payment.checkout.return', [
+      'commerce_order' => $order->id(),
+      'step' => 'payment',
+    ], ['absolute' => FALSE])->toString();
+  }
+
+  /**
+   * Builds the URL to the "cancel" page.
+   *
+   * @param \Drupal\commerce_order\Entity\OrderInterface $order
+   *   The order.
+   *
+   * @return string
+   *   The "cancel" page url.
+   */
+  protected function buildCancelUrl(OrderInterface $order) {
+    return Url::fromRoute('commerce_payment.checkout.cancel', [
+      'commerce_order' => $order->id(),
+      'step' => 'payment',
+    ], ['absolute' => FALSE])->toString();
   }
 
 }
