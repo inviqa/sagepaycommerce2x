@@ -10,5 +10,7 @@
     "issues": "https://www.drupal.org/project/issues/commerce_sagepay",
     "source": "http://cgit.drupalcode.org/commerce_sagepay"
   },
-  "require": { }
+  "require": {
+    "drupal/commerce": "~2"
+  }
 }
